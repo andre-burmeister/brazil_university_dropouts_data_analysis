@@ -2,3 +2,5 @@ dados/*/*
 __pycache__/
 .venv/
 brazil_dropouts_dashboard/
+.cursor/
+.streamlit/
