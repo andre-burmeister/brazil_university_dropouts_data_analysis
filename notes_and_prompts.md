@@ -156,3 +156,40 @@ Os gráficos devem ser os seguintes:
 Eles devem seguir exatamente o mesmo formato e disposição dos gráficos na primeira aba.
 
 """
+
+5. Correções nos gráficos da nova aba:
+
+"""
+Mudanças nos gráficos da nova aba:
+
+1. Nas duas abas, há um espaço grande entre o texto acima do mapa e o mapa em sí. Se possível, diminua esse espaço.
+
+2. A maior e menor taxa de evasão são desnecessárias acima do mapa da segunda aba, quando há mais de duas categorias (grupos B e C).
+
+3. Nos grupos com duas categorias (A, D, E e F) as cores do gráfico de barras deve ser a mesma das pontas da barra contínua de cores. Assim fica mais fácil de entender o que as cores do mapa significam
+
+"""
+
+"""
+
+Correções:
+
+1. Impedir de arrastar o mapa: consigo clicar e arrastar o mapa, o que não deveria ser possível.
+2. O botão de "Ver o Brasil todo" deve aparecer apenas quando um estado está selecionado, junto com o aviso de que apenas os dados daquele estado estão sendo mostrados.
+
+"""
+
+6. Mudanças finais de aparência:
+
+"""
+
+No streamlit padrão tem um modo escuro. Porque ele sumiu?
+Por favor, inclua o modo escuro de volta.
+
+"""
+
+# Notas:
+
+## Prints para adicionar a apresentação:
+
+- Print da
