@@ -17,10 +17,45 @@ st.markdown(
     .block-container { padding-top: 1.6rem; padding-left: 1.6rem; padding-right: 1.6rem; max-width: 100%; }
     h1 { letter-spacing: -0.03em; font-weight: 650; }
     [data-testid="stMetric"] {
-        background: #ffffff;
-        border: 1px solid rgba(20, 34, 43, 0.08);
+        background: light-dark(#ffffff, #262730);
+        border: 1px solid light-dark(rgba(20, 34, 43, 0.08), rgba(250, 250, 250, 0.12));
         border-radius: 14px;
         padding: 0.7rem 0.9rem;
+    }
+    .aviso-estado {
+        background: light-dark(#ffffff, #262730);
+        border: 1px solid light-dark(rgba(14, 124, 116, 0.35), rgba(94, 234, 212, 0.45));
+        border-left: 8px solid light-dark(#0e7c74, #5eead4);
+        border-radius: 12px;
+        padding: 0.85rem 1rem;
+        margin: 0.15rem 0 0.9rem;
+        color: light-dark(#14222b, #fafafa);
+    }
+    .aviso-estado-rotulo {
+        font-size: 0.78rem;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: light-dark(#0e7c74, #5eead4);
+        font-weight: 700;
+    }
+    .aviso-estado-nome {
+        font-size: 1.7rem;
+        font-weight: 700;
+        line-height: 1.15;
+        margin-top: 0.15rem;
+    }
+    .aviso-estado-texto { font-size: 0.95rem; margin-top: 0.25rem; }
+    [data-testid="stVegaLiteChart"] text[fill="#14222b"] {
+        fill: light-dark(#14222b, #fafafa) !important;
+    }
+    [data-testid="stColumn"]:has([data-testid="stCustomComponentV1"]) [data-testid="stVerticalBlock"] {
+        gap: 0.35rem;
+    }
+    [data-testid="stColumn"]:has([data-testid="stCustomComponentV1"]) [data-testid="stHeading"] {
+        margin-bottom: 0;
+    }
+    [data-testid="stColumn"]:has([data-testid="stCustomComponentV1"]) [data-testid="stElementContainer"]:has([data-testid="stCustomComponentV1"]) {
+        margin-top: 0;
     }
     </style>
     """,
@@ -151,7 +186,7 @@ def faixa_diferenca(dados):
     )
 
 
-def mostrar_recorte(cursos, ofertas, nome):
+def mostrar_recorte(cursos, ofertas, nome, chave_limpar):
     matriculas = int(ofertas["QT_MAT_2023"].sum()) if not ofertas.empty else 0
     taxa_txt = evasao.percentual(ofertas["QT_EVAS"].sum() / matriculas) if matriculas else "—"
     coluna_cursos, coluna_matriculas, coluna_taxa, coluna_estado = st.columns(4)
@@ -159,29 +194,24 @@ def mostrar_recorte(cursos, ofertas, nome):
     coluna_matriculas.metric("Matrículas em 2023", evasao.inteiro(matriculas))
     coluna_taxa.metric("Taxa do recorte", taxa_txt)
     coluna_estado.metric("Estado", nome or "Brasil")
-    if nome:
+    if not nome:
+        return False
+    coluna_aviso, coluna_acao = st.columns([5, 1], vertical_alignment="center")
+    with coluna_aviso:
         st.markdown(
             f"""
-            <div style="
-                background: #ffffff;
-                border: 1px solid rgba(14, 124, 116, 0.35);
-                border-left: 8px solid {evasao.COR_SELECAO};
-                border-radius: 12px;
-                padding: 0.85rem 1rem;
-                margin: 0.15rem 0 0.9rem;
-                color: {evasao.COR_TEXTO};
-            ">
-                <div style="font-size: 0.78rem; letter-spacing: 0.06em; text-transform: uppercase; color: {evasao.COR_SELECAO}; font-weight: 700;">
-                    Mostrando só este estado
-                </div>
-                <div style="font-size: 1.7rem; font-weight: 700; line-height: 1.15; margin-top: 0.15rem;">{nome}</div>
-                <div style="font-size: 0.95rem; margin-top: 0.25rem;">
+            <div class="aviso-estado">
+                <div class="aviso-estado-rotulo">Mostrando só este estado</div>
+                <div class="aviso-estado-nome">{nome}</div>
+                <div class="aviso-estado-texto">
                     Os gráficos usam as ofertas de {nome}. O curso entra no recorte pelo total de matrículas no Brasil.
                 </div>
             </div>
             """,
             unsafe_allow_html=True,
         )
+    with coluna_acao:
+        return st.button("Ver o Brasil todo", key=chave_limpar)
 
 
 OPCAO_TODAS_AREAS = "Todas as áreas"
@@ -201,9 +231,9 @@ def mostrar_barras(dados, coluna, titulo, rolar=False):
     grafico = evasao.grafico_barras(dados, coluna, titulo)
     if rolar and len(dados) > 12:
         with st.container(height=520, border=False):
-            st.altair_chart(grafico, width="stretch", theme=None)
+            st.altair_chart(grafico, width="stretch")
     else:
-        st.altair_chart(grafico, width="stretch", theme=None)
+        st.altair_chart(grafico, width="stretch")
 
 
 def mostrar_barras_grupos(dados, comparacao, titulo):
@@ -212,7 +242,7 @@ def mostrar_barras_grupos(dados, comparacao, titulo):
         return
     faixa_extremos(dados, "grupo")
     grafico = evasao.grafico_barras_grupos(dados, comparacao, titulo)
-    st.altair_chart(grafico, width="stretch", theme=None)
+    st.altair_chart(grafico, width="stretch")
 
 
 def texto_mapa_grupos(comparacao):
@@ -321,7 +351,7 @@ with aba_cursos:
         visao = evasao.visao_uf(recorte, uf)
         ofertas = visao["ofertas"]
         cursos = visao["cursos"]
-        mostrar_recorte(cursos, ofertas, nome)
+        limpar = mostrar_recorte(cursos, ofertas, nome, "limpar_uf")
 
         coluna_graficos, coluna_mapa = st.columns([1, 1.35], gap="large")
 
@@ -333,7 +363,6 @@ with aba_cursos:
                 "Clique em um estado para filtrar os gráficos da esquerda. "
                 "Clique de novo no mesmo estado para voltar ao Brasil."
             )
-            limpar = st.button("Ver o Brasil todo", disabled=uf is None, key="limpar_uf")
             mapa, dados_mapa = evasao.mapa_estados(recorte["estados"], geojson, uf)
             if dados_mapa.empty:
                 st.info("Nenhum estado tem cursos neste recorte.")
@@ -451,7 +480,7 @@ with aba_grupos:
         uf = st.session_state.uf_grupos
         nome = evasao.nome_uf(geojson, uf) if uf else None
         visao = evasao.visao_uf(recorte, uf)
-        mostrar_recorte(visao["cursos"], visao["ofertas"], nome)
+        limpar = mostrar_recorte(visao["cursos"], visao["ofertas"], nome, "limpar_uf_grupos")
         por_estado = evasao.estados_dos_grupos(recorte["elegiveis"], comparacao)
         grupos = evasao.taxas_dos_grupos(visao["ofertas"], comparacao)
 
@@ -463,7 +492,6 @@ with aba_grupos:
             else:
                 st.header("Qual grupo tem a maior taxa em cada estado?")
             st.caption(texto_mapa_grupos(comparacao))
-            limpar = st.button("Ver o Brasil todo", disabled=uf is None, key="limpar_uf_grupos")
             mapa, dados_mapa = evasao.mapa_grupos(por_estado, geojson, comparacao, uf)
             if dados_mapa.empty:
                 if comparacao["modo"] == "diferenca":
@@ -474,8 +502,6 @@ with aba_grupos:
             else:
                 if comparacao["modo"] == "diferenca":
                     faixa_diferenca(dados_mapa)
-                else:
-                    faixa_extremos(dados_mapa, "nome_estado")
                 saida_mapa = st_folium(
                     mapa,
                     height=820,

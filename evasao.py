@@ -119,8 +119,8 @@ COMPARACOES = {
         "texto_diferenca": "mulheres − homens",
         "legenda": "Mulheres − homens (p.p.)",
         "grupos": [
-            _grupo("FEM", "Mulheres", "#9d3c66"),
-            _grupo("MASC", "Homens", "#1d4e89"),
+            _grupo("FEM", "Mulheres", CORES_DIFERENCA[-1]),
+            _grupo("MASC", "Homens", CORES_DIFERENCA[0]),
         ],
         "diferenca": ("FEM", "MASC"),
     },
@@ -156,8 +156,8 @@ COMPARACOES = {
         "texto_diferenca": "com deficiência − sem deficiência",
         "legenda": "Com deficiência − sem deficiência (p.p.)",
         "grupos": [
-            _grupo("DEFICIENTE", "Com deficiência", "#7e22ce"),
-            _grupo("SEM_DEFICIENTE", "Sem deficiência", "#0f766e"),
+            _grupo("DEFICIENTE", "Com deficiência", CORES_DIFERENCA[-1]),
+            _grupo("SEM_DEFICIENTE", "Sem deficiência", CORES_DIFERENCA[0]),
         ],
         "diferenca": ("DEFICIENTE", "SEM_DEFICIENTE"),
     },
@@ -167,8 +167,8 @@ COMPARACOES = {
         "texto_diferenca": "cotistas − não cotistas",
         "legenda": "Cotistas − não cotistas (p.p.)",
         "grupos": [
-            _grupo("RESERVA_VAGA", "Cotistas", "#0e7490"),
-            _grupo("SEM_RESERVA", "Não cotistas", "#a16207"),
+            _grupo("RESERVA_VAGA", "Cotistas", CORES_DIFERENCA[-1]),
+            _grupo("SEM_RESERVA", "Não cotistas", CORES_DIFERENCA[0]),
         ],
         "diferenca": ("RESERVA_VAGA", "SEM_RESERVA"),
     },
@@ -179,8 +179,8 @@ COMPARACOES = {
         "legenda": "Escola pública − particular (p.p.)",
         "nota": "Quem não informou a escola aparece nas barras e fica de fora desta diferença.",
         "grupos": [
-            _grupo("PROCESCPUBLICA", "Escola pública", "#1d4e89"),
-            _grupo("PROCESCPRIVADA", "Escola particular", "#c2410c"),
+            _grupo("PROCESCPUBLICA", "Escola pública", CORES_DIFERENCA[-1]),
+            _grupo("PROCESCPRIVADA", "Escola particular", CORES_DIFERENCA[0]),
             _grupo("PROCNAOINFORMADA", "Não informada", "#57534e"),
         ],
         "diferenca": ("PROCESCPUBLICA", "PROCESCPRIVADA"),
@@ -501,7 +501,7 @@ def grafico_barras(dados, coluna_nome, titulo):
             "taxa_pct:Q",
             title="Taxa de evasão (%)",
             scale=alt.Scale(domain=dominio_x, nice=False),
-            axis=alt.Axis(format=".0f", titleColor=COR_TEXTO, labelColor=COR_TEXTO),
+            axis=alt.Axis(format=".0f"),
         ),
         color=alt.Color(
             "NO_CINE_AREA_GERAL:N",
@@ -540,14 +540,14 @@ def grafico_barras(dados, coluna_nome, titulo):
 
     return (
         camadas.properties(
-            title=alt.Title(titulo, anchor="start", color=COR_TEXTO, fontSize=16, fontWeight=600),
+            title=alt.Title(titulo, anchor="start", fontSize=16, fontWeight=600),
             width="container",
             height=alt.Step(34),
             padding={"right": 64, "left": 8, "top": 8, "bottom": 4},
             autosize=alt.AutoSizeParams(type="fit-x", contains="padding", resize=True),
         )
         .configure_view(strokeWidth=0)
-        .configure_axis(gridColor="#efeae3", domainColor="#ddd6cc", tickColor="#ddd6cc", labelFontSize=12, titleFontSize=13)
+        .configure_axis(labelFontSize=12, titleFontSize=13)
     )
 
 
@@ -580,7 +580,7 @@ def grafico_barras_grupos(dados, comparacao, titulo):
             "taxa_pct:Q",
             title="Taxa de evasão (%)",
             scale=alt.Scale(domain=dominio_x, nice=False),
-            axis=alt.Axis(format=".0f", titleColor=COR_TEXTO, labelColor=COR_TEXTO),
+            axis=alt.Axis(format=".0f"),
         ),
         color=alt.Color("grupo:N", scale=escala, legend=None),
         tooltip=dicas,
@@ -613,14 +613,14 @@ def grafico_barras_grupos(dados, comparacao, titulo):
         camadas = zero + camadas
     return (
         camadas.properties(
-            title=alt.Title(titulo, anchor="start", color=COR_TEXTO, fontSize=16, fontWeight=600),
+            title=alt.Title(titulo, anchor="start", fontSize=16, fontWeight=600),
             width="container",
             height=alt.Step(34),
             padding={"right": 64, "left": 8, "top": 8, "bottom": 4},
             autosize=alt.AutoSizeParams(type="fit-x", contains="padding", resize=True),
         )
         .configure_view(strokeWidth=0)
-        .configure_axis(gridColor="#efeae3", domainColor="#ddd6cc", tickColor="#ddd6cc", labelFontSize=12, titleFontSize=13)
+        .configure_axis(labelFontSize=12, titleFontSize=13)
     )
 
 
@@ -683,10 +683,9 @@ def estado_no_ponto(geojson, lat, lng):
 
 def _caixa_legenda(conteudo):
     return f"""
-    <div style="
+    <div id="legenda-mapa" style="
         position: fixed; z-index: 9999; left: 16px; bottom: 16px;
-        background: #ffffff; color: {COR_TEXTO};
-        border: 1px solid rgba(20, 34, 43, 0.08); border-radius: 12px;
+        border-radius: 12px;
         padding: 10px 12px 8px; font-family: sans-serif; font-size: 12px;
         box-shadow: 0 1px 2px rgba(20, 34, 43, 0.06);
     ">
@@ -730,7 +729,7 @@ def _legenda_taxa(vmin, vmax, titulo="Taxa de evasão (%)", cores=None, com_sina
                     <span>{marca(vmax)}</span>
                 </div>
             </div>
-            <div style="width: 1px; align-self: stretch; background: rgba(20, 34, 43, 0.08);"></div>
+            <div style="width: 1px; align-self: stretch; background: color-mix(in srgb, currentColor 18%, transparent);"></div>
             <div style="display: flex; align-items: center; gap: 6px; font-size: 11px;">
                 {_marca_cor(COR_SEM_DADOS)}
                 sem dados
@@ -781,6 +780,7 @@ def _montar_mapa(limites, uf_selecionada, legenda_html, campos, aliases):
         tiles=None,
         zoom_control=False,
         attribution_control=False,
+        dragging=False,
         scrollWheelZoom=False,
         doubleClickZoom=False,
         touchZoom=False,
@@ -790,8 +790,13 @@ def _montar_mapa(limites, uf_selecionada, legenda_html, campos, aliases):
     mapa.get_root().html.add_child(
         folium.Element(
             "<style>"
-            f".leaflet-container {{ background: {COR_FUNDO_MAPA}; }}"
+            ".leaflet-container { background: var(--background-color, #f6f4ef); }"
             ".leaflet-interactive { cursor: pointer; }"
+            "#legenda-mapa {"
+            "  background: var(--secondary-background-color, #ffffff);"
+            "  color: var(--text-color, #14222b);"
+            "  border: 1px solid color-mix(in srgb, var(--text-color, #14222b) 14%, transparent);"
+            "}"
             "</style>"
         )
     )
@@ -824,6 +829,7 @@ def _montar_mapa(limites, uf_selecionada, legenda_html, campos, aliases):
     mapa.fit_bounds(_caixa_geojson(limites), padding=(16, 16))
     mapa.add_child(_LigarCliqueEstado())
     mapa.add_child(_TrazerEstadoFrente(uf_selecionada))
+    mapa.add_child(_EncaixarNoTopo())
     mapa.add_child(_TravarZoom())
     return mapa
 
@@ -1030,6 +1036,105 @@ class _TrazerEstadoFrente(MacroElement):
     )
 
 
+class _EncaixarNoTopo(MacroElement):
+    """Sobe o país até a borda de cima, para o quadro alto não abrir um vão."""
+
+    _template = Template(
+        """
+        {% macro script(this, kwargs) %}
+            var mapa = {{ this._parent.get_name() }};
+            var ultimoTamanho = "";
+            var encaixando = false;
+            var pendente = false;
+            function encaixar() {
+                if (encaixando) {
+                    pendente = true;
+                    return;
+                }
+                encaixando = true;
+                try {
+                    mapa.invalidateSize({animate: false, pan: false});
+                    var tamanho = mapa.getSize();
+                    if (!tamanho || tamanho.x < 20 || tamanho.y < 50) {
+                        return;
+                    }
+                    var assinatura = tamanho.x + "x" + tamanho.y;
+                    if (assinatura === ultimoTamanho && isFinite(mapa.getZoom())) {
+                        return;
+                    }
+                    var limites = null;
+                    mapa.eachLayer(function (camada) {
+                        if (!camada.getBounds) {
+                            return;
+                        }
+                        try {
+                            var caixa = camada.getBounds();
+                            if (caixa.isValid()) {
+                                limites = limites ? limites.extend(caixa) : caixa;
+                            }
+                        } catch (erro) {}
+                    });
+                    if (!limites) {
+                        return;
+                    }
+                    ultimoTamanho = assinatura;
+                    mapa.options.minZoom = 0;
+                    mapa.options.maxZoom = 18;
+                    mapa.setMinZoom(0);
+                    mapa.setMaxZoom(18);
+                    if (!isFinite(mapa.getZoom())) {
+                        mapa.setView([-15.8, -47.9], 4, {animate: false});
+                    }
+                    mapa.fitBounds(limites, {padding: [16, 16], animate: false});
+                    var topo = mapa.latLngToContainerPoint(limites.getNorthWest()).y;
+                    if (topo > 8) {
+                        mapa.panBy([0, topo - 8], {animate: false});
+                    }
+                    var legenda = document.getElementById("legenda-mapa");
+                    if (legenda) {
+                        var sul = mapa.latLngToContainerPoint(limites.getSouthEast()).y;
+                        var abaixo = sul + 12;
+                        var limite = tamanho.y - legenda.offsetHeight - 8;
+                        legenda.style.bottom = "auto";
+                        legenda.style.top = Math.max(8, Math.min(abaixo, limite)) + "px";
+                    }
+                    var nivel = mapa.getZoom();
+                    if (isFinite(nivel)) {
+                        mapa.setMinZoom(nivel);
+                        mapa.setMaxZoom(nivel);
+                    }
+                } finally {
+                    encaixando = false;
+                    if (pendente) {
+                        pendente = false;
+                        encaixar();
+                    }
+                }
+            }
+            mapa.whenReady(function () {
+                setTimeout(encaixar, 0);
+                setTimeout(encaixar, 200);
+                var alvo = mapa.getContainer();
+                if (window.ResizeObserver && alvo) {
+                    new ResizeObserver(function () { encaixar(); }).observe(alvo);
+                }
+                if (window.IntersectionObserver && alvo) {
+                    new IntersectionObserver(function (entradas) {
+                        for (var i = 0; i < entradas.length; i++) {
+                            if (entradas[i].isIntersecting && entradas[i].intersectionRect.height > 50) {
+                                encaixar();
+                                return;
+                            }
+                        }
+                    }).observe(alvo);
+                }
+                window.addEventListener("resize", encaixar);
+            });
+        {% endmacro %}
+        """
+    )
+
+
 class _TravarZoom(MacroElement):
     """Fixa o zoom calculado pelo enquadramento dos estados."""
 
@@ -1038,8 +1143,10 @@ class _TravarZoom(MacroElement):
         {% macro script(this, kwargs) %}
             var mapa = {{ this._parent.get_name() }};
             var nivel = mapa.getZoom();
-            mapa.setMinZoom(nivel);
-            mapa.setMaxZoom(nivel);
+            if (isFinite(nivel)) {
+                mapa.setMinZoom(nivel);
+                mapa.setMaxZoom(nivel);
+            }
         {% endmacro %}
         """
     )
