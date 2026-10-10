@@ -179,6 +179,12 @@ Correções:
 
 """
 
+"""
+
+Os gráficos da aba de grupos demográficos não estão mudando ao modificar os filtros da barra lateral (Matrículas mínimas no curso,Excluir cursos sem concluintes em 2023, Modalidade, Organização acadêmica e Categoria administrativa). Aplique esses filtros também aos gráficos da aba de grupos demográficos
+
+"""
+
 6. Mudanças finais de aparência:
 
 """
@@ -188,8 +194,151 @@ Por favor, inclua o modo escuro de volta.
 
 """
 
+7. Novas cnfigurações no colorplath:
+
+"""
+
+Na verdade, ao invés de 
+- Número de estudantes matriculados no estado,
+- Númeto de instituições de ensino do estado
+Eu gostaria que fosse:
+- Número de estudantes matriculados no estado por habitante
+- Númeto de instituições de ensino do estado por habitante
+
+"""
+
+8. Novos gráficos:
+
+"""
+
+Estou pensando em um gráfio assim para a aba com comparações entre grupos demográficos:
+
+Scatter plot da segunda aba:
+    - Para grupos demográficos com 2 categorias (Mulheres e Homens, Deficiência, Cotas, alunos vindo de escolas pública vs particular): 
+        - Gráfico com a taxa de evasão de um grupo no eixo X e outro no eixo Y
+        - Cada ponto pode ser: um curso ou uma área do conhecimento (seletor ao lado).
+        - Tamanho dos pontos é a quantidade de matrículas naquele curso ou área do conhecimento.
+    - Para grupos demográficos com vários grupos:
+        - Tem alguma sugestão?
+
+Que gráfico poderia estar no lugar desse para os grupos demográficos com várias categorias (ex.: Cor ou Raça, idade). 
+Teria como fazer um scatterplot parecido? Como?
+Se não, você teria alguma sugestão de outro tipo de gráfico para fazer no lugar?
+
+
+"""
+
+
 # Notas:
 
-## Prints para adicionar a apresentação:
+## Opções de gráficos extras para fazer:
 
-- Print da
+- Gráficos boxplot: 
+	- gráficos onde cada curso é um ponto e cada área do conhecimento tem um box plot
+	- Mesma coisa, mas pra grupos demográficos
+
+- Scatter plots: 
+	- Quantidade de matriculados vs taxa de evasão
+
+- Star plots
+- Heat maps
+
+- Barras empilhadas para grupos diferentes, em cursos e estados diferentes
+
+- Adicionar os links para os dados no dashboard
+
+
+
+## Gráficos motivados pelo roteiro da apresentação:
+1. Adição ao colorplath da primeira página:
+    - Um seletor que seleciona se a cor do colorplath representa:
+        - A taxa de evasão do estado (já está assim)
+        - O número total de estudantes matriculados no estado
+        - O númeto total de instituições de ensino do estado
+
+
+Novos gráficos a serem adicionados:
+
+
+### Na primeira aba:
+
+1. Scatter plot:
+    - Eixo Y é a taxa de evasão
+    - Eixo X pode ser:
+        - Número de instituições oferecendo o curso
+        - Número de aluno mariculados vs taxa de evasão
+    - Adicione um seletor dropdown para selecionar se os pontos representam cursos ou áreas do conhecimento.
+    - Tamanho dos pontos é a quantidade de matrículas naquele curso ou área do conhecimento.
+
+2. Vários Box plots alinhados horizontalmente, cada um representando uma área do conhecimento. 
+    - O box plot é sobre o dados de taxa de evasão de cada curso, mas ele deve ser pesado pelo número de alunos matriculados. Ou seja, na prática é um box plot de "probabilidade de evasão por aluno"
+    - Sobre cada um dos box plots, adicione pontos representando cada curso. 
+    - O tamanho dos ponto representa a quantidade de matriculados naquele cursos.
+    - Lembrando, o box plot NÃO é baseado linearmente na taxa de evasão dos cursos, mas sim pela taxa de evasão PESADA PELO NÚMERO DE ALUNOS.
+
+### Na segunda aba:
+
+3. Scatter plot:
+    - Para grupos demográficos com 2 categorias (Mulheres e Homens, Deficiência, Cotas, alunos vindo de escolas pública vs particular): 
+        - Gráfico com a taxa de evasão de um grupo no eixo X e outro no eixo Y
+        - Cada ponto pode ser: um curso ou uma área do conhecimento (seletor ao lado).
+        - Tamanho dos pontos é a quantidade de matrículas naquele curso ou área do conhecimento.
+    - Para idades, o gráfico de linhas como foi sugerido
+        - No eixo X, as faixas em ordem. No eixo Y, a taxa de evasão. Cada linha é uma área do conhecimento. A espessura acompanha o volume de matrículas.
+    - Para cor e raça, o mesmo scatterplot usado para 2 categorias, mas com um seletor para selecionar a cor/raça em destaque
+
+
+
+
+9. Alterações no dashboard:
+
+"""
+
+Crie um readme com:
+
+- Informações básicas sobre o app
+- Onde e como baixar os dados
+- Como rodar o app
+
+Baseie-se nas informações contidas em @atividade01_proposta_analise_visual.ipynb.
+
+Na introdução do dashboard, abaixo do título, adicione o link para o site do Censo da Educação Superior do INEP e informações sobre como os dados foram coletados  
+
+
+"""
+
+
+"""
+
+Correções nos gráficos da primeira aba:
+
+1. No scatter plot da primeira aba:
+    - Permita selecionar uma área do conhecimento para destacar, clicando na bolinha. Ao selecionar, as outras devem ficar mais transparentes
+    - Ao selecionar para que cada ponto seja uma área do conhecimento (ao invés de curso), os eixos somem. Corrija isso. Os eixos devem aparecer nos dois gráficos. Além disso, retire o nome de cada ponto. Isso deixa o gráfico poluído.
+
+2. Nos box plots:
+    - Mude a direção dos box plots (de verticais para horizontais)
+    - Deixe o eixo da taxa de evasão visível (agora eixo X). 
+    - Sobreponha os pontos ao box plot (talvez deixe o box plot mais transparente para facilitar a visualização dos pontos) 
+
+3. Não consigo ver a legenda de tamanho dos círculos no modo escuro. Modifique a cor delas nesse modo.
+
+"""
+
+"""
+
+Correções nos gráficos da segunda aba:
+
+1. Nos scatter plots com duas categorias (incluindo de cor e raça):
+    - Mantenha os eixos aparecendo.
+    - Mantenha a razão entre eixo x e y fixa. Nesse gráfico, isso é importante pois os dois eixos medem taxa de evasão.
+    - Deixe selecionar uma área de conhecimento para destacá-la. As outras devem ficar semitransparentes (exatamente como no scatter-plot da primeira aba)
+
+2. No gráfico de linhas (idades):
+    - Aumente a diferença de espessura das linhas. A espessura deve ser proporcional ao número de matriculados no curso.
+    - Adicione transparência às linhas para que seja visível onde estão mais concentradas.
+    - Deixe os eixos do gráfico visíveis.
+
+3. Para todos os gráficos com pontos de tamanho variável. A área do ponto deve ser proporcional ao número que ele representa. Nesse caso, número de matriculados. Ou seja, o raio ou diâmetro do círculo tem que ser proporcional à raiz quadrada do número de matriculados.
+
+"""
