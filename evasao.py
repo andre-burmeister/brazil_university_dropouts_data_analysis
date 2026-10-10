@@ -3,10 +3,12 @@
 from pathlib import Path
 import copy
 import json
+import zlib
 
 import altair as alt
 import branca.colormap as cm
 import folium
+import numpy as np
 import pandas as pd
 from branca.element import MacroElement, Template
 
@@ -106,6 +108,79 @@ COR_CONTORNO = "#4e4842"
 COR_SELECAO = "#0e7c74"
 CORES_TAXA = ["#ffffcc", "#fed976", "#fd8d3c", "#e31a1c", "#800026"]
 CORES_DIFERENCA = ["#0f766e", "#99d1cb", "#f7f7f7", "#fdbe85", "#e31a1c"]
+TAXA_GERAL = "GERAL"
+ROTULO_TAXA_GERAL = "Taxa geral"
+MIN_MATRICULAS_FAIXA = 100
+EIXOS_VOLUME = {
+    "instituicoes": "Número de instituições",
+    "matriculas": "Matrículas em 2023",
+}
+GRANULACAO = {
+    "curso": "Curso",
+    "area": "Área do conhecimento",
+}
+METRICAS_MAPA = {
+    "taxa": {
+        "rotulo": "Taxa de evasão",
+        "coluna": "taxa_pct",
+        "titulo_legenda": "Taxa de evasão (%)",
+        "formato": "percentual",
+        "sufixo": "%",
+    },
+    "matriculas": {
+        "rotulo": "Alunos matriculados por mil habitantes",
+        "coluna": "MAT_POR_MIL",
+        "titulo_legenda": "Matrículas por mil hab.",
+        "formato": "decimal",
+        "sufixo": " por mil",
+    },
+    "instituicoes": {
+        "rotulo": "Instituições por milhão de habitantes",
+        "coluna": "IES_POR_MILHAO",
+        "titulo_legenda": "Instituições por milhão",
+        "formato": "decimal",
+        "sufixo": " por milhão",
+    },
+    "municipios": {
+        "rotulo": "Porcentagem de municípios com IES",
+        "coluna": "PCT_MUN_IES",
+        "titulo_legenda": "Municípios com IES (%)",
+        "formato": "percentual",
+        "sufixo": "%",
+    },
+}
+# População: estimativa do IBGE em 1º de julho de 2024 (SIDRA, tabela 6579).
+# Municípios: 5.570 em 2024. Mato Grosso tinha 141; Boa Esperança do Norte entrou em 2025.
+# A tupla é (código da UF, população, municípios).
+REFERENCIA_UF = {
+    "RO": (11, 1_746_227, 52),
+    "AC": (12, 880_631, 22),
+    "AM": (13, 4_281_209, 62),
+    "RR": (14, 716_793, 15),
+    "PA": (15, 8_664_306, 144),
+    "AP": (16, 802_837, 16),
+    "TO": (17, 1_577_342, 139),
+    "MA": (21, 7_010_960, 217),
+    "PI": (22, 3_375_646, 224),
+    "CE": (23, 9_233_656, 184),
+    "RN": (24, 3_446_071, 167),
+    "PB": (25, 4_145_040, 223),
+    "PE": (26, 9_539_029, 185),
+    "AL": (27, 3_220_104, 102),
+    "SE": (28, 2_291_077, 75),
+    "BA": (29, 14_850_513, 417),
+    "MG": (31, 21_322_691, 853),
+    "ES": (32, 4_102_129, 78),
+    "RJ": (33, 17_219_679, 92),
+    "SP": (35, 45_973_194, 645),
+    "PR": (41, 11_824_665, 399),
+    "SC": (42, 8_058_441, 295),
+    "RS": (43, 11_229_915, 497),
+    "MS": (50, 2_901_895, 79),
+    "MT": (51, 3_836_399, 141),
+    "GO": (52, 7_350_483, 246),
+    "DF": (53, 2_982_818, 1),
+}
 
 
 def _grupo(identificador, rotulo, cor):
@@ -317,6 +392,80 @@ def resumir_ofertas(ofertas):
     }
 
 
+def _estados_vazios():
+    return pd.DataFrame(
+        columns=[
+            "SG_UF",
+            "NO_UF",
+            *QUANTIDADES,
+            "TX_EVAS",
+            "QT_IES",
+            "QT_MUN_IES",
+            "POPULACAO",
+            "N_MUNICIPIOS",
+            "MAT_POR_MIL",
+            "IES_POR_MILHAO",
+            "PCT_MUN_IES",
+        ]
+    )
+
+
+def _referencia_uf():
+    return pd.DataFrame(
+        [
+            {
+                "SG_UF": sigla,
+                "CO_UF": codigo,
+                "POPULACAO": populacao,
+                "N_MUNICIPIOS": municipios,
+            }
+            for sigla, (codigo, populacao, municipios) in REFERENCIA_UF.items()
+        ]
+    )
+
+
+def _municipios_com_ies(ofertas):
+    """Municípios da própria UF com ao menos uma oferta no recorte."""
+    locais = ofertas.dropna(subset=["CO_MUNICIPIO", "SG_UF"]).copy()
+    if locais.empty:
+        return pd.DataFrame(columns=["SG_UF", "QT_MUN_IES"])
+    codigo_municipio = (
+        locais["CO_MUNICIPIO"].astype("int64").astype(str).str.zfill(7).str[:2].astype(int)
+    )
+    codigo_uf = locais["SG_UF"].map({sigla: dados[0] for sigla, dados in REFERENCIA_UF.items()})
+    locais = locais[codigo_municipio == codigo_uf]
+    if locais.empty:
+        return pd.DataFrame(columns=["SG_UF", "QT_MUN_IES"])
+    return locais.groupby("SG_UF", dropna=False)["CO_MUNICIPIO"].nunique().rename("QT_MUN_IES").reset_index()
+
+
+def _taxas_territoriais(estados):
+    """Matrículas por mil habitantes, instituições por milhão e cobertura municipal."""
+    estados = estados.merge(_referencia_uf(), on="SG_UF", how="left")
+    estados["MAT_POR_MIL"] = estados["QT_MAT_2023"] / estados["POPULACAO"] * 1_000
+    estados["IES_POR_MILHAO"] = estados["QT_IES"] / estados["POPULACAO"] * 1_000_000
+    estados["PCT_MUN_IES"] = estados["QT_MUN_IES"] / estados["N_MUNICIPIOS"] * 100
+    return estados
+
+
+def _estados_de_ofertas(ofertas):
+    """Soma a taxa, as instituições e a cobertura municipal por UF."""
+    if ofertas.empty:
+        return _estados_vazios()
+    no_estado = ofertas[ofertas["SG_UF"].notna()]
+    if no_estado.empty:
+        return _estados_vazios()
+    estados = agregar_taxa(no_estado, ["SG_UF", "NO_UF"])
+    instituicoes = (
+        no_estado.groupby("SG_UF", dropna=False)["CO_IES"].nunique().rename("QT_IES").reset_index()
+    )
+    estados = estados.merge(instituicoes, on="SG_UF", how="left")
+    estados = estados.merge(_municipios_com_ies(no_estado), on="SG_UF", how="left")
+    estados["QT_IES"] = estados["QT_IES"].fillna(0)
+    estados["QT_MUN_IES"] = estados["QT_MUN_IES"].fillna(0)
+    return _taxas_territoriais(estados)
+
+
 def preparar_recorte(ofertas, modalidades, matriculas_minimas, excluir_sem_concluintes, organizacao, categoria):
     filtradas = filtrar_ofertas(ofertas, modalidades, organizacao, categoria)
     por_codigo = agregar_taxa(filtradas, ["CO_CINE_ROTULO"])
@@ -325,12 +474,24 @@ def preparar_recorte(ofertas, modalidades, matriculas_minimas, excluir_sem_concl
         mascara = mascara & (por_codigo["QT_CONC_2023"] > 0)
     codigos = set(por_codigo.loc[mascara, "CO_CINE_ROTULO"])
     elegiveis = filtradas[filtradas["CO_CINE_ROTULO"].isin(codigos)]
-    estados = agregar_taxa(elegiveis[elegiveis["SG_UF"].notna()], ["SG_UF", "NO_UF"])
     return {
         **resumir_ofertas(elegiveis),
         "elegiveis": elegiveis,
-        "estados": estados,
+        "estados": _estados_de_ofertas(elegiveis),
     }
+
+
+def estados_da_area(recorte, area):
+    """Recalcula o mapa com os cursos cuja área predominante, no Brasil, é a escolhida."""
+    if not area:
+        return recorte["estados"]
+    cursos = recorte["cursos"]
+    if cursos.empty or "NO_CINE_AREA_GERAL" not in cursos.columns:
+        return _estados_vazios()
+    nomes = cursos["NO_CINE_AREA_GERAL"].fillna("Sem área")
+    codigos = set(cursos.loc[nomes == area, "CO_CINE_ROTULO"])
+    ofertas = recorte["elegiveis"]
+    return _estados_de_ofertas(ofertas[ofertas["CO_CINE_ROTULO"].isin(codigos)])
 
 
 def visao_uf(recorte, uf):
@@ -443,6 +604,167 @@ def _area_predominante(ofertas):
     return totais.loc[escolhida, ["CO_CINE_ROTULO", "NO_CINE_AREA_GERAL"]].reset_index(drop=True)
 
 
+def com_instituicoes(ofertas, cursos, areas):
+    """Conta instituições distintas. Na área, vale a área predominante do curso."""
+    cursos = cursos.copy()
+    areas = areas.copy()
+    if ofertas.empty or cursos.empty:
+        cursos["QT_IES"] = 0
+        if not areas.empty:
+            areas["QT_IES"] = 0
+        return cursos, areas
+    por_curso = ofertas.groupby("CO_CINE_ROTULO", dropna=False)["CO_IES"].nunique()
+    cursos["QT_IES"] = cursos["CO_CINE_ROTULO"].map(por_curso).fillna(0).astype(int)
+    predominante = _area_predominante(ofertas).rename(
+        columns={"NO_CINE_AREA_GERAL": "area_predominante"}
+    )
+    com_area = ofertas.merge(predominante, on="CO_CINE_ROTULO", how="left")
+    por_area = com_area.groupby("area_predominante", dropna=False)["CO_IES"].nunique()
+    areas["QT_IES"] = areas["NO_CINE_AREA_GERAL"].map(por_area).fillna(0).astype(int)
+    return cursos, areas
+
+
+def _colunas_grupo(identificadores):
+    colunas = ["QT_MAT_2023", "QT_EVAS"]
+    for identificador in identificadores:
+        colunas.extend([f"QT_MAT_{identificador}_2023", f"QT_EVAS_{identificador}"])
+    return colunas
+
+
+def _aplicar_taxas(tabela, identificadores):
+    matriculas = tabela["QT_MAT_2023"]
+    tabela["TX_EVAS"] = tabela["QT_EVAS"] / matriculas.where(matriculas > 0)
+    for identificador in identificadores:
+        do_grupo = tabela[f"QT_MAT_{identificador}_2023"]
+        tabela[f"TX_{identificador}"] = tabela[f"QT_EVAS_{identificador}"] / do_grupo.where(do_grupo > 0)
+    return tabela
+
+
+def taxas_por_entidade(ofertas, identificadores):
+    """Soma as contagens por curso e por área predominante, e só depois divide."""
+    colunas = _colunas_grupo(identificadores)
+    vazios = pd.DataFrame(columns=["CO_CINE_ROTULO", "NO_CINE_ROTULO", "NO_CINE_AREA_GERAL", *colunas])
+    if ofertas.empty:
+        return vazios, vazios.iloc[0:0]
+    cursos = ofertas.groupby("CO_CINE_ROTULO", dropna=False)[colunas].sum().reset_index()
+    cursos = cursos.merge(_rotulo_do_curso(ofertas), on="CO_CINE_ROTULO", how="left")
+    cursos = cursos.merge(_area_predominante(ofertas), on="CO_CINE_ROTULO", how="left")
+    cursos = _aplicar_taxas(cursos, identificadores)
+    areas = (
+        cursos.groupby("NO_CINE_AREA_GERAL", dropna=False)[colunas].sum().reset_index()
+        if not cursos.empty
+        else cursos.iloc[0:0]
+    )
+    if not areas.empty:
+        areas = _aplicar_taxas(areas, identificadores)
+    return cursos, areas
+
+
+def _taxa_do_eixo(tabela, identificador):
+    if identificador == TAXA_GERAL:
+        return tabela["TX_EVAS"] * 100
+    return tabela[f"TX_{identificador}"] * 100
+
+
+def pares_de_grupos(ofertas, id_x, id_y):
+    """Uma linha por curso e por área, com as duas taxas em percentual."""
+    identificadores = [identificador for identificador in (id_x, id_y) if identificador != TAXA_GERAL]
+    cursos, areas = taxas_por_entidade(ofertas, identificadores)
+
+    def preparar(tabela, coluna_nome):
+        if tabela.empty:
+            return tabela
+        plot = tabela.copy()
+        plot["NO_CINE_AREA_GERAL"] = plot["NO_CINE_AREA_GERAL"].fillna("Sem área")
+        plot["nome"] = plot[coluna_nome]
+        plot["taxa_x"] = _taxa_do_eixo(plot, id_x)
+        plot["taxa_y"] = _taxa_do_eixo(plot, id_y)
+        return plot.dropna(subset=["taxa_x", "taxa_y", "QT_MAT_2023"])
+
+    return preparar(cursos, "NO_CINE_ROTULO"), preparar(areas, "NO_CINE_AREA_GERAL")
+
+
+def serie_idade(ofertas):
+    """Uma linha por área e faixa. Faixa com pouca matrícula fica sem taxa e corta a linha."""
+    grupos = COMPARACOES["idade"]["grupos"]
+    identificadores = [grupo["id"] for grupo in grupos]
+    _, areas = taxas_por_entidade(ofertas, identificadores)
+    colunas = ["NO_CINE_AREA_GERAL", "faixa", "ordem", "taxa_pct", "QT_MAT_FAIXA", "QT_MAT_AREA"]
+    if areas.empty:
+        return pd.DataFrame(columns=colunas)
+    registros = []
+    for _, linha in areas.iterrows():
+        area = linha["NO_CINE_AREA_GERAL"]
+        if pd.isna(area):
+            area = "Sem área"
+        for ordem, grupo in enumerate(grupos):
+            matriculas = float(linha[f"QT_MAT_{grupo['id']}_2023"])
+            taxa = linha[f"TX_{grupo['id']}"]
+            taxa_pct = None if matriculas < MIN_MATRICULAS_FAIXA or pd.isna(taxa) else float(taxa) * 100
+            registros.append(
+                {
+                    "NO_CINE_AREA_GERAL": area,
+                    "faixa": grupo["rotulo"],
+                    "ordem": ordem,
+                    "taxa_pct": taxa_pct,
+                    "QT_MAT_FAIXA": matriculas,
+                    "QT_MAT_AREA": float(linha["QT_MAT_2023"]),
+                }
+            )
+    return pd.DataFrame(registros, columns=colunas)
+
+
+def percentil_ponderado(taxas, pesos, proporcao):
+    """Taxa do curso em que a matrícula acumulada alcança a proporção pedida."""
+    taxas = np.asarray(taxas, dtype=float)
+    pesos = np.asarray(pesos, dtype=float)
+    ordem = np.argsort(taxas, kind="mergesort")
+    taxas = taxas[ordem]
+    pesos = pesos[ordem]
+    acumulado = np.cumsum(pesos)
+    total = float(acumulado[-1]) if len(acumulado) else 0.0
+    if total <= 0:
+        return np.nan
+    indice = int(np.searchsorted(acumulado, proporcao * total, side="left"))
+    return float(taxas[min(indice, len(taxas) - 1)])
+
+
+def quartis_ponderados(cursos):
+    """Quartis da taxa por área, pesados pelas matrículas. Bigodes na regra de Tukey."""
+    colunas = ["NO_CINE_AREA_GERAL", "q1", "mediana", "q3", "bigode_inf", "bigode_sup"]
+    if cursos.empty:
+        return pd.DataFrame(columns=colunas)
+    registros = []
+    base = cursos.dropna(subset=["TX_EVAS", "QT_MAT_2023"]).copy()
+    base = base[base["QT_MAT_2023"] > 0]
+    base["NO_CINE_AREA_GERAL"] = base["NO_CINE_AREA_GERAL"].fillna("Sem área")
+    for area, bloco in base.groupby("NO_CINE_AREA_GERAL", dropna=False):
+        taxas = bloco["TX_EVAS"].to_numpy(dtype=float) * 100
+        pesos = bloco["QT_MAT_2023"].to_numpy(dtype=float)
+        q1 = percentil_ponderado(taxas, pesos, 0.25)
+        mediana = percentil_ponderado(taxas, pesos, 0.50)
+        q3 = percentil_ponderado(taxas, pesos, 0.75)
+        intervalo = q3 - q1
+        cerca_inf = q1 - 1.5 * intervalo
+        cerca_sup = q3 + 1.5 * intervalo
+        dentro = taxas[(taxas >= cerca_inf) & (taxas <= cerca_sup)]
+        if len(dentro) == 0:
+            bigode_inf, bigode_sup = q1, q3
+        else:
+            bigode_inf, bigode_sup = float(dentro.min()), float(dentro.max())
+        registros.append(
+            {
+                "NO_CINE_AREA_GERAL": area,
+                "q1": q1,
+                "mediana": mediana,
+                "q3": q3,
+                "bigode_inf": bigode_inf,
+                "bigode_sup": bigode_sup,
+            }
+        )
+    return pd.DataFrame(registros, columns=colunas)
+
+
 def inteiro(valor):
     return f"{int(round(valor)):,}".replace(",", ".")
 
@@ -465,7 +787,20 @@ def _escala_areas():
     return alt.Scale(domain=list(CORES_AREA), range=list(CORES_AREA.values()))
 
 
-def grafico_barras(dados, coluna_nome, titulo):
+def _selecao_de_area():
+    """Um clique escolhe a área. Outro clique na mesma solta. Um clique novo troca."""
+    return alt.selection_point(
+        name="area_clicada",
+        fields=["NO_CINE_AREA_GERAL"],
+        empty=True,
+        toggle=(
+            "datum && length(data('area_clicada_store')) && "
+            "data('area_clicada_store')[0].values[0] == datum.NO_CINE_AREA_GERAL"
+        ),
+    )
+
+
+def grafico_barras(dados, coluna_nome, titulo, selecionavel=False):
     plot = dados.dropna(subset=["TX_EVAS"]).copy()
     plot["NO_CINE_AREA_GERAL"] = plot["NO_CINE_AREA_GERAL"].fillna("Sem área")
     plot["taxa_pct"] = plot["TX_EVAS"] * 100
@@ -473,6 +808,8 @@ def grafico_barras(dados, coluna_nome, titulo):
     plot["x_nome"] = plot["taxa_pct"].where(plot["taxa_pct"] < 0, 0.0)
     plot["matriculas_txt"] = plot["QT_MAT_2023"].map(inteiro)
     plot["evadidos_txt"] = plot["QT_EVAS"].map(inteiro)
+    selecao = _selecao_de_area() if selecionavel else None
+    opacidade = alt.condition(selecao, alt.value(1), alt.value(0.28)) if selecao is not None else None
     titulos = {
         "NO_CURSO": "Curso",
         "NO_CINE_ROTULO": "Curso",
@@ -495,7 +832,23 @@ def grafico_barras(dados, coluna_nome, titulo):
     dominio_x = [xmin, xmax + folga]
     eixo_y = alt.Y(f"{coluna_nome}:N", sort=ordem, axis=None, title=None)
 
-    barras = alt.Chart(plot).mark_bar(cornerRadiusEnd=4, height=22, fillOpacity=1).encode(
+    extra = {"opacity": opacidade} if opacidade is not None else {}
+    marca_barra = {"cornerRadiusEnd": 4, "height": 22, "fillOpacity": 1}
+    marca_nome = {
+        "align": "left",
+        "baseline": "middle",
+        "dx": 8,
+        "fontSize": 12,
+        "fontWeight": 600,
+        "color": COR_TEXTO_BARRA,
+        "limit": alt.expr("max(1, abs(scale('x', datum.taxa_pct) - scale('x', 0)) - 16)"),
+    }
+    marca_taxa = {"align": "left", "dx": 6, "fontSize": 12, "color": COR_TEXTO}
+    if selecionavel:
+        marca_barra["cursor"] = "pointer"
+        marca_nome["cursor"] = "pointer"
+        marca_taxa["cursor"] = "pointer"
+    barras = alt.Chart(plot).mark_bar(**marca_barra).encode(
         y=eixo_y,
         x=alt.X(
             "taxa_pct:Q",
@@ -510,28 +863,31 @@ def grafico_barras(dados, coluna_nome, titulo):
             legend=None,
         ),
         tooltip=dicas,
+        **extra,
     )
-    nomes = alt.Chart(plot).mark_text(
-        align="left",
-        baseline="middle",
-        dx=8,
-        fontSize=12,
-        fontWeight=600,
-        color=COR_TEXTO_BARRA,
-        limit=alt.expr("max(1, abs(scale('x', datum.taxa_pct) - scale('x', 0)) - 16)"),
-    ).encode(
+    nomes = alt.Chart(plot).mark_text(**marca_nome).encode(
         y=eixo_y,
         x=alt.X("x_nome:Q", scale=alt.Scale(domain=dominio_x, nice=False), axis=None),
         text=f"{coluna_nome}:N",
         tooltip=dicas,
+        **extra,
     )
-    taxas = alt.Chart(plot).mark_text(align="left", dx=6, fontSize=12, color=COR_TEXTO).encode(
+    taxas = alt.Chart(plot).mark_text(**marca_taxa).encode(
         y=eixo_y,
         x=alt.X("taxa_pct:Q", scale=alt.Scale(domain=dominio_x, nice=False), axis=None),
         text="rotulo:N",
         tooltip=dicas,
+        **extra,
     )
-    camadas = barras + nomes + taxas
+    if selecao is not None:
+        # O nome em cada camada entra no clique. O Altair, sozinho, só liga a primeira.
+        barras = barras.properties(name="clique_barra")
+        nomes = nomes.properties(name="clique_nome")
+        taxas = taxas.properties(name="clique_taxa")
+        camadas = (barras + nomes + taxas).add_params(selecao)
+        camadas.params[0].views = ["clique_barra", "clique_nome", "clique_taxa"]
+    else:
+        camadas = barras + nomes + taxas
     if xmin < 0:
         zero = alt.Chart(pd.DataFrame({"taxa_pct": [0]})).mark_rule(
             color="#c5bfb4", strokeDash=[4, 3]
@@ -624,6 +980,385 @@ def grafico_barras_grupos(dados, comparacao, titulo):
     )
 
 
+def _ordem_areas(presentes):
+    presentes = set(presentes)
+    conhecidas = [area for area in CORES_AREA if area in presentes]
+    extras = sorted(presentes - set(conhecidas))
+    return conhecidas + extras
+
+
+def _deslocamento_ponto(codigo):
+    """Desvio estável, em pixels, para os cursos não caírem todos no mesmo ponto."""
+    valor = zlib.crc32(str(codigo).encode("utf-8")) % 1000
+    return valor / 999 * 32 - 16
+
+
+def _cor_area(legenda):
+    return alt.Color(
+        "NO_CINE_AREA_GERAL:N",
+        title="Área do conhecimento",
+        scale=_escala_areas(),
+        legend=legenda,
+    )
+
+
+def _legenda_tamanho():
+    """Círculos e texto na cor que o painel clareia no modo escuro."""
+    return alt.Legend(
+        title="Matrículas em 2023",
+        symbolFillColor=COR_TEXTO,
+        symbolStrokeColor=COR_TEXTO,
+        labelColor=COR_TEXTO,
+        titleColor=COR_TEXTO,
+    )
+
+
+def _tamanho_matriculas(dados, maior=640):
+    """A área do círculo é proporcional às matrículas. O raio segue a raiz quadrada."""
+    topo = float(pd.to_numeric(dados["QT_MAT_2023"], errors="coerce").max())
+    if pd.isna(topo) or topo <= 0:
+        topo = 1.0
+    return alt.Size(
+        "QT_MAT_2023:Q",
+        title="Matrículas em 2023",
+        scale=alt.Scale(domain=[0, topo], range=[0, maior], zero=True),
+        legend=_legenda_tamanho(),
+    )
+
+
+def _codificacao_tamanho(dados, maior, variavel, fixo=180):
+    if variavel:
+        return _tamanho_matriculas(dados, maior)
+    return alt.value(fixo)
+
+
+def _fechar_grafico(camadas, titulo, altura, padding=None, largura=None):
+    propriedades = {
+        "title": alt.Title(titulo, anchor="start", fontSize=16, fontWeight=600),
+        "height": altura,
+        "padding": padding or {"right": 16, "left": 8, "top": 8, "bottom": 8},
+    }
+    if largura is None:
+        propriedades["width"] = "container"
+        propriedades["autosize"] = alt.AutoSizeParams(type="fit-x", contains="padding", resize=True)
+    else:
+        propriedades["width"] = largura
+        propriedades["autosize"] = alt.AutoSizeParams(type="pad", resize=False)
+    return (
+        camadas.properties(**propriedades)
+        .configure_view(strokeWidth=0)
+        .configure_axis(labelFontSize=12, titleFontSize=13)
+        .configure_legend(labelFontSize=11, titleFontSize=12)
+    )
+
+
+def _dominio_taxa(*series):
+    """O eixo da taxa começa em 0 e não passa de 100. O topo acompanha os dados."""
+    topos = []
+    for serie in series:
+        numeros = pd.to_numeric(pd.Series(serie), errors="coerce").dropna()
+        if not numeros.empty:
+            topos.append(float(numeros.max()))
+    if not topos:
+        return [0.0, 100.0]
+    topo = max(max(topos), 0.0)
+    folga = max(topo, 1.0) * 0.06
+    return [0.0, min(100.0, topo + folga)]
+
+
+def grafico_dispersao_volume(dados, eixo_x, por_area, titulo, tamanho_variavel=True):
+    plot = dados.dropna(subset=["TX_EVAS"]).copy()
+    plot["NO_CINE_AREA_GERAL"] = plot["NO_CINE_AREA_GERAL"].fillna("Sem área")
+    plot["taxa_pct"] = plot["TX_EVAS"] * 100
+    plot["matriculas_txt"] = plot["QT_MAT_2023"].map(inteiro)
+    plot["instituicoes_txt"] = plot["QT_IES"].map(inteiro)
+    dominio_taxa = _dominio_taxa(plot["taxa_pct"])
+    coluna_x = "QT_IES" if eixo_x == "instituicoes" else "QT_MAT_2023"
+    titulo_x = "Instituições" if eixo_x == "instituicoes" else "Matrículas em 2023"
+    nome = "NO_CINE_AREA_GERAL" if por_area else "NO_CINE_ROTULO"
+    dicas = [alt.Tooltip(f"{nome}:N", title="Área do conhecimento" if por_area else "Curso")]
+    if not por_area:
+        dicas.append(alt.Tooltip("NO_CINE_AREA_GERAL:N", title="Área do conhecimento"))
+    dicas.extend(
+        [
+            alt.Tooltip("taxa_pct:Q", title="Taxa de evasão (%)", format=".1f"),
+            alt.Tooltip("matriculas_txt:N", title="Matrículas em 2023"),
+            alt.Tooltip("instituicoes_txt:N", title="Instituições"),
+        ]
+    )
+    destaque = alt.selection_point(
+        fields=["NO_CINE_AREA_GERAL"],
+        on="click",
+        empty="all",
+        toggle=True,
+    )
+    pontos = (
+        alt.Chart(plot)
+        .mark_circle(clip=True)
+        .encode(
+            x=alt.X(f"{coluna_x}:Q", title=titulo_x),
+            y=alt.Y(
+                "taxa_pct:Q",
+                title="Taxa de evasão (%)",
+                scale=alt.Scale(domain=dominio_taxa, nice=False, zero=True),
+            ),
+            size=_codificacao_tamanho(plot, 2560, tamanho_variavel),
+            color=_cor_area(alt.Legend()),
+            opacity=alt.condition(
+                destaque,
+                alt.value(0.92 if tamanho_variavel else 0.7),
+                alt.value(0.15),
+            ),
+            tooltip=dicas,
+        )
+        .add_params(destaque)
+    )
+    return _fechar_grafico(pontos, titulo, 460)
+
+
+def _eixo_area_horizontal(ordem):
+    return alt.Y(
+        "NO_CINE_AREA_GERAL:N",
+        sort=ordem,
+        title=None,
+        axis=alt.Axis(labelLimit=280, labelFontSize=12),
+    )
+
+
+def _eixo_taxa(inferior, superior):
+    """O mesmo campo em todas as camadas, senão um axis nulo apaga a escala."""
+    return alt.X(
+        "taxa_pct:Q",
+        title="Taxa de evasão (%)",
+        scale=alt.Scale(domain=[inferior, superior], nice=False, zero=False),
+        axis=alt.Axis(format=".0f", grid=True, labelFontSize=12, titleFontSize=13),
+    )
+
+
+def _faixa_taxa(stats, inicio, fim):
+    quadro = stats.loc[:, ["NO_CINE_AREA_GERAL", inicio, fim]].copy()
+    return quadro.rename(columns={inicio: "taxa_pct", fim: "taxa_fim"})
+
+
+def _ponto_taxa(stats, coluna):
+    quadro = stats.loc[:, ["NO_CINE_AREA_GERAL", coluna]].copy()
+    return quadro.rename(columns={coluna: "taxa_pct"})
+
+
+def grafico_boxplot_areas(cursos, titulo, tamanho_variavel=True):
+    pontos = cursos.dropna(subset=["TX_EVAS"]).copy()
+    pontos["NO_CINE_AREA_GERAL"] = pontos["NO_CINE_AREA_GERAL"].fillna("Sem área")
+    pontos["taxa_pct"] = pontos["TX_EVAS"] * 100
+    pontos["matriculas_txt"] = pontos["QT_MAT_2023"].map(inteiro)
+    pontos["deslocamento"] = pontos["CO_CINE_ROTULO"].map(_deslocamento_ponto)
+    stats = quartis_ponderados(pontos)
+    ordem = _ordem_areas(pontos["NO_CINE_AREA_GERAL"])
+    series_taxa = [pontos["taxa_pct"]]
+    if not stats.empty:
+        series_taxa.append(stats["bigode_sup"])
+    inferior, superior = _dominio_taxa(*series_taxa)
+    dicas = [
+        alt.Tooltip("NO_CINE_ROTULO:N", title="Curso"),
+        alt.Tooltip("NO_CINE_AREA_GERAL:N", title="Área do conhecimento"),
+        alt.Tooltip("taxa_pct:Q", title="Taxa de evasão (%)", format=".1f"),
+        alt.Tooltip("matriculas_txt:N", title="Matrículas em 2023"),
+    ]
+    bigodes = alt.Chart(_faixa_taxa(stats, "bigode_inf", "bigode_sup")).mark_rule(
+        strokeWidth=1.5, clip=True
+    ).encode(
+        y=_eixo_area_horizontal(ordem),
+        x=_eixo_taxa(inferior, superior),
+        x2=alt.X2("taxa_fim:Q"),
+        color=_cor_area(None),
+    )
+    inicios = _ponto_taxa(stats, "bigode_inf")
+    fins = _ponto_taxa(stats, "bigode_sup")
+    topos = pd.concat([inicios, fins], ignore_index=True)
+    tampas = alt.Chart(topos).mark_tick(
+        orient="vertical", size=16, thickness=1.5, clip=True
+    ).encode(
+        y=_eixo_area_horizontal(ordem),
+        x=_eixo_taxa(inferior, superior),
+        color=_cor_area(None),
+    )
+    caixas = alt.Chart(_faixa_taxa(stats, "q1", "q3")).mark_bar(
+        size=28, opacity=0.22, clip=True
+    ).encode(
+        y=_eixo_area_horizontal(ordem),
+        x=_eixo_taxa(inferior, superior),
+        x2=alt.X2("taxa_fim:Q"),
+        color=_cor_area(None),
+    )
+    medianas = alt.Chart(_ponto_taxa(stats, "mediana")).mark_tick(
+        orient="vertical", size=28, thickness=2.5, clip=True
+    ).encode(
+        y=_eixo_area_horizontal(ordem),
+        x=_eixo_taxa(inferior, superior),
+        color=_cor_area(None),
+    )
+    circulos = alt.Chart(pontos).mark_circle(
+        opacity=0.9 if tamanho_variavel else 0.7
+    ).encode(
+        y=_eixo_area_horizontal(ordem),
+        yOffset=alt.YOffset(
+            "deslocamento:Q",
+            scale=alt.Scale(domain=[-16, 16], range=[-7, 7]),
+        ),
+        x=_eixo_taxa(inferior, superior),
+        size=_codificacao_tamanho(pontos, 640, tamanho_variavel, fixo=45),
+        color=_cor_area(None),
+        tooltip=dicas,
+    )
+    return _fechar_grafico(
+        bigodes + tampas + caixas + medianas + circulos,
+        titulo,
+        alt.Step(52),
+        padding={"right": 28, "left": 8, "top": 8, "bottom": 28},
+    )
+
+
+LADO_DISPERSAO = 560
+
+
+def _escala_par(dominio):
+    return alt.Scale(domain=dominio, nice=False, zero=False)
+
+
+def _marca_eixo():
+    return alt.Axis(format=".0f", grid=True, labelFontSize=12, titleFontSize=13)
+
+
+def grafico_dispersao_grupos(dados, titulo, rotulo_x, rotulo_y, por_area, tamanho_variavel=True):
+    plot = dados.copy()
+    plot["NO_CINE_AREA_GERAL"] = plot["NO_CINE_AREA_GERAL"].fillna("Sem área")
+    plot["matriculas_txt"] = plot["QT_MAT_2023"].map(inteiro)
+    dominio = _dominio_taxa(plot["taxa_x"], plot["taxa_y"])
+    titulo_x = f"Taxa de evasão, {rotulo_x} (%)"
+    titulo_y = f"Taxa de evasão, {rotulo_y} (%)"
+    dicas = [alt.Tooltip("nome:N", title="Área do conhecimento" if por_area else "Curso")]
+    if not por_area:
+        dicas.append(alt.Tooltip("NO_CINE_AREA_GERAL:N", title="Área do conhecimento"))
+    dicas.extend(
+        [
+            alt.Tooltip("taxa_x:Q", title=f"{rotulo_x} (%)", format=".1f"),
+            alt.Tooltip("taxa_y:Q", title=f"{rotulo_y} (%)", format=".1f"),
+            alt.Tooltip("matriculas_txt:N", title="Matrículas em 2023"),
+        ]
+    )
+    destaque = alt.selection_point(
+        fields=["NO_CINE_AREA_GERAL"],
+        on="click",
+        empty="all",
+        toggle=True,
+    )
+
+    def eixo_x():
+        return alt.X(
+            "taxa_x:Q",
+            title=titulo_x,
+            scale=_escala_par(dominio),
+            axis=_marca_eixo(),
+        )
+
+    def eixo_y():
+        return alt.Y(
+            "taxa_y:Q",
+            title=titulo_y,
+            scale=_escala_par(dominio),
+            axis=_marca_eixo(),
+        )
+
+    diagonal = alt.Chart(pd.DataFrame({"taxa_x": dominio, "taxa_y": dominio})).mark_line(
+        strokeDash=[6, 4], color="#c5bfb4", clip=True
+    ).encode(x=eixo_x(), y=eixo_y())
+    pontos = (
+        alt.Chart(plot)
+        .mark_circle(clip=True)
+        .encode(
+            x=eixo_x(),
+            y=eixo_y(),
+            size=_codificacao_tamanho(plot, 640, tamanho_variavel),
+            color=_cor_area(alt.Legend()),
+            opacity=alt.condition(
+                destaque,
+                alt.value(0.92 if tamanho_variavel else 0.7),
+                alt.value(0.15),
+            ),
+            tooltip=dicas,
+        )
+        .add_params(destaque)
+    )
+    camadas = diagonal + pontos
+    if por_area:
+        nomes = alt.Chart(plot).mark_text(
+            align="left", dx=8, fontSize=11, color=COR_TEXTO, clip=True
+        ).encode(
+            x=eixo_x(),
+            y=eixo_y(),
+            text="nome:N",
+            tooltip=dicas,
+        )
+        camadas = camadas + nomes
+    return _fechar_grafico(
+        camadas,
+        titulo,
+        LADO_DISPERSAO,
+        largura=LADO_DISPERSAO,
+        padding={"right": 16, "left": 8, "top": 8, "bottom": 8},
+    )
+
+
+def grafico_linhas_idade(dados, titulo):
+    plot = dados.copy()
+    plot["NO_CINE_AREA_GERAL"] = plot["NO_CINE_AREA_GERAL"].fillna("Sem área")
+    plot["matriculas_faixa_txt"] = plot["QT_MAT_FAIXA"].map(inteiro)
+    plot["matriculas_area_txt"] = plot["QT_MAT_AREA"].map(inteiro)
+    ordem = [grupo["rotulo"] for grupo in COMPARACOES["idade"]["grupos"]]
+    dominio_taxa = _dominio_taxa(plot["taxa_pct"])
+    topo = float(pd.to_numeric(plot["QT_MAT_AREA"], errors="coerce").max())
+    if pd.isna(topo) or topo <= 0:
+        topo = 1.0
+    dicas = [
+        alt.Tooltip("NO_CINE_AREA_GERAL:N", title="Área do conhecimento"),
+        alt.Tooltip("faixa:N", title="Faixa de idade"),
+        alt.Tooltip("taxa_pct:Q", title="Taxa de evasão (%)", format=".1f"),
+        alt.Tooltip("matriculas_faixa_txt:N", title="Matrículas na faixa"),
+        alt.Tooltip("matriculas_area_txt:N", title="Matrículas na área"),
+    ]
+
+    def eixo_x():
+        return alt.X("faixa:N", sort=ordem, title="Faixa de idade")
+
+    def eixo_y():
+        return alt.Y(
+            "taxa_pct:Q",
+            title="Taxa de evasão (%)",
+            scale=alt.Scale(domain=dominio_taxa, nice=False, zero=True),
+        )
+
+    linhas = alt.Chart(plot).mark_line(
+        opacity=0.4, clip=True, invalid="break-paths-filter-domains"
+    ).encode(
+        x=eixo_x(),
+        y=eixo_y(),
+        color=_cor_area(alt.Legend()),
+        strokeWidth=alt.StrokeWidth(
+            "QT_MAT_AREA:Q",
+            scale=alt.Scale(domain=[0, topo], range=[0, 16], zero=True),
+            legend=None,
+        ),
+        tooltip=dicas,
+    )
+    visiveis = plot.dropna(subset=["taxa_pct"])
+    circulos = alt.Chart(visiveis).mark_circle(size=48, opacity=0.55, clip=True).encode(
+        x=eixo_x(),
+        y=eixo_y(),
+        color=_cor_area(None),
+        tooltip=dicas,
+    )
+    return _fechar_grafico(linhas + circulos, titulo, 460)
+
+
 def _decimal(valor):
     return f"{valor:.1f}".replace(".", ",")
 
@@ -703,24 +1438,33 @@ def _marca_cor(cor):
     )
 
 
-def _legenda_taxa(vmin, vmax, titulo="Taxa de evasão (%)", cores=None, com_sinal=False):
+def formatar_metrica_mapa(metrica, valor):
+    info = METRICAS_MAPA[metrica]
+    texto = inteiro(valor) if info["formato"] == "inteiro" else _decimal(valor)
+    return texto + info.get("sufixo", "")
+
+
+def _legenda_taxa(vmin, vmax, titulo="Taxa de evasão (%)", cores=None, com_sinal=False, inteiros=False):
     paleta = list(cores or CORES_TAXA)
     paradas = ", ".join(paleta)
     meio = (vmin + vmax) / 2
 
     def marca(valor):
+        if inteiros:
+            return inteiro(valor)
         texto = _decimal(valor)
         if com_sinal and valor > 0:
             return "+" + texto
         return texto
 
+    largura = 300 if inteiros else 168
     return _caixa_legenda(
         f"""
         <div style="font-weight: 650; margin-bottom: 6px;">{titulo}</div>
         <div style="display: flex; align-items: center; gap: 10px;">
             <div>
                 <div style="
-                    width: 168px; height: 10px; border-radius: 999px;
+                    width: {largura}px; height: 10px; border-radius: 999px;
                     background: linear-gradient(to right, {paradas});
                 "></div>
                 <div style="display: flex; justify-content: space-between; margin-top: 3px; font-size: 11px;">
@@ -834,17 +1578,29 @@ def _montar_mapa(limites, uf_selecionada, legenda_html, campos, aliases):
     return mapa
 
 
-def mapa_estados(estados, geojson, uf_selecionada=None):
+def mapa_estados(estados, geojson, uf_selecionada=None, metrica="taxa"):
+    """Pinta cada estado pela métrica escolhida."""
+    info = METRICAS_MAPA[metrica]
     limites, siglas = _malha_estados(geojson)
     dados = siglas.merge(estados, on="SG_UF", how="left")
     dados["taxa_pct"] = dados["TX_EVAS"] * 100
+    for coluna_extra in ("QT_IES", "QT_MAT_2023", "MAT_POR_MIL", "IES_POR_MILHAO", "PCT_MUN_IES"):
+        if coluna_extra not in dados.columns:
+            dados[coluna_extra] = pd.NA
 
-    taxa_por_sigla = dados.set_index("SG_UF")["taxa_pct"].to_dict()
-    matriculas_por_sigla = dados.set_index("SG_UF")["QT_MAT_2023"].to_dict()
-    coloridos = dados.dropna(subset=["taxa_pct"])
+    coluna = info["coluna"]
+    por_sigla = {campo: dados.set_index("SG_UF")[campo].to_dict() for campo in (
+        "taxa_pct",
+        "QT_MAT_2023",
+        "QT_IES",
+        "MAT_POR_MIL",
+        "IES_POR_MILHAO",
+        "PCT_MUN_IES",
+    )}
+    coloridos = dados.dropna(subset=[coluna])
     escala = None
     if not coloridos.empty:
-        valores = coloridos["taxa_pct"].astype(float)
+        valores = coloridos[coluna].astype(float)
         vmin = float(valores.min())
         vmax = float(valores.max())
         if vmin == vmax:
@@ -854,25 +1610,50 @@ def mapa_estados(estados, geojson, uf_selecionada=None):
 
     for feicao in limites["features"]:
         sigla = feicao["properties"]["sigla"]
-        taxa = taxa_por_sigla.get(sigla)
-        matriculas = matriculas_por_sigla.get(sigla)
-        if escala is not None and pd.notna(taxa):
-            feicao["properties"]["cor"] = escala.rgb_hex_str(float(taxa))
-            feicao["properties"]["taxa"] = _decimal(taxa) + "%"
+        taxa = por_sigla["taxa_pct"].get(sigla)
+        valor = por_sigla[coluna].get(sigla)
+        if escala is not None and pd.notna(valor):
+            feicao["properties"]["cor"] = escala.rgb_hex_str(float(valor))
         else:
             feicao["properties"]["cor"] = COR_SEM_DADOS
-            feicao["properties"]["taxa"] = "sem dados"
-        feicao["properties"]["matriculas"] = inteiro(matriculas) if pd.notna(matriculas) else "—"
+        feicao["properties"]["taxa"] = _decimal(taxa) + "%" if pd.notna(taxa) else "sem dados"
+        feicao["properties"]["mat_por_mil"] = _texto_ou_traco(por_sigla["MAT_POR_MIL"].get(sigla), _decimal)
+        feicao["properties"]["ies_por_milhao"] = _texto_ou_traco(
+            por_sigla["IES_POR_MILHAO"].get(sigla), _decimal
+        )
+        feicao["properties"]["municipios"] = _texto_ou_traco(
+            por_sigla["PCT_MUN_IES"].get(sigla), lambda v: _decimal(v) + "%"
+        )
+        feicao["properties"]["matriculas"] = _texto_ou_traco(por_sigla["QT_MAT_2023"].get(sigla), inteiro)
+        feicao["properties"]["instituicoes"] = _texto_ou_traco(por_sigla["QT_IES"].get(sigla), inteiro)
 
-    legenda = _legenda_taxa(escala.vmin, escala.vmax) if escala is not None else None
+    legenda = (
+        _legenda_taxa(
+            escala.vmin,
+            escala.vmax,
+            titulo=info["titulo_legenda"],
+            inteiros=info["formato"] == "inteiro",
+        )
+        if escala is not None
+        else None
+    )
     mapa = _montar_mapa(
         limites,
         uf_selecionada,
         legenda,
-        ["name", "sigla", "taxa", "matriculas"],
-        ["Estado:", "UF:", "Taxa de evasão:", "Matrículas em 2023:"],
+        ["name", "sigla", "taxa", "mat_por_mil", "ies_por_milhao", "municipios", "matriculas", "instituicoes"],
+        [
+            "Estado:",
+            "UF:",
+            "Taxa de evasão:",
+            "Matrículas por mil hab.:",
+            "Instituições por milhão:",
+            "Municípios com IES:",
+            "Matrículas em 2023:",
+            "Instituições:",
+        ],
     )
-    return mapa, dados.dropna(subset=["TX_EVAS"])
+    return mapa, dados.dropna(subset=[coluna])
 
 
 def mapa_grupos(por_estado, geojson, comparacao, uf_selecionada=None):
@@ -1037,7 +1818,7 @@ class _TrazerEstadoFrente(MacroElement):
 
 
 class _EncaixarNoTopo(MacroElement):
-    """Sobe o país até a borda de cima, para o quadro alto não abrir um vão."""
+    """Sobe o país até a borda de cima e corta a altura no fim da legenda."""
 
     _template = Template(
         """
@@ -1090,13 +1871,35 @@ class _EncaixarNoTopo(MacroElement):
                     if (topo > 8) {
                         mapa.panBy([0, topo - 8], {animate: false});
                     }
+                    var sul = mapa.latLngToContainerPoint(limites.getSouthEast()).y;
                     var legenda = document.getElementById("legenda-mapa");
+                    if (legenda && !legenda.offsetHeight) {
+                        ultimoTamanho = "";
+                        return;
+                    }
+                    var altura = Math.ceil(sul + 16);
                     if (legenda) {
-                        var sul = mapa.latLngToContainerPoint(limites.getSouthEast()).y;
                         var abaixo = sul + 12;
-                        var limite = tamanho.y - legenda.offsetHeight - 8;
                         legenda.style.bottom = "auto";
-                        legenda.style.top = Math.max(8, Math.min(abaixo, limite)) + "px";
+                        legenda.style.top = Math.max(8, abaixo) + "px";
+                        altura = Math.ceil(abaixo + legenda.offsetHeight + 16);
+                    }
+                    var caixa = document.getElementById("map_div") || mapa.getContainer();
+                    if (caixa && altura + 8 < tamanho.y) {
+                        caixa.style.height = altura + "px";
+                        var moldura = document.getElementById("parent");
+                        if (moldura) {
+                            moldura.style.height = altura + "px";
+                        }
+                        document.body.style.height = altura + "px";
+                        document.documentElement.style.height = altura + "px";
+                        mapa.invalidateSize({animate: false, pan: false});
+                        if (window.Streamlit && window.Streamlit.setFrameHeight) {
+                            window.Streamlit.setFrameHeight(altura);
+                        }
+                        ultimoTamanho = "";
+                        setTimeout(encaixar, 0);
+                        return;
                     }
                     var nivel = mapa.getZoom();
                     if (isFinite(nivel)) {
