@@ -291,6 +291,37 @@ def mostrar_barras(dados, coluna, titulo, rolar=False, selecionavel=False, chave
         st.info("Nenhum curso passou pelos filtros.")
         return None
     faixa_extremos(dados, coluna)
+    # #region agent log
+    if selecionavel:
+        import json as _json
+        import time as _time
+
+        with open(
+            "/home/andre/AA_UFRGS/pós_graduação_IA/IA001_analise_de_dados_python/codigo/brazil_university_dropouts_data_analysis/.cursor/debug-5c4ed3.log",
+            "a",
+            encoding="utf-8",
+        ) as _arquivo:
+            _arquivo.write(
+                _json.dumps(
+                    {
+                        "sessionId": "5c4ed3",
+                        "runId": "post-fix",
+                        "hypothesisId": "C",
+                        "location": "app.py:mostrar_barras",
+                        "message": "dados do grafico de areas antes de desenhar",
+                        "data": {
+                            "linhas": int(len(dados)),
+                            "coluna": coluna,
+                            "chave": chave,
+                            "taxas_nulas": int(dados["TX_EVAS"].isna().sum()) if "TX_EVAS" in dados.columns else None,
+                        },
+                        "timestamp": int(_time.time() * 1000),
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )
+    # #endregion
     grafico = evasao.grafico_barras(dados, coluna, titulo, selecionavel=selecionavel)
     kwargs = {"width": "stretch"}
     if selecionavel:

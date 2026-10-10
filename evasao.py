@@ -880,14 +880,111 @@ def grafico_barras(dados, coluna_nome, titulo, selecionavel=False):
         **extra,
     )
     if selecao is not None:
-        # O nome em cada camada entra no clique. O Altair, sozinho, só liga a primeira.
-        barras = barras.properties(name="clique_barra")
-        nomes = nomes.properties(name="clique_nome")
-        taxas = taxas.properties(name="clique_taxa")
-        camadas = (barras + nomes + taxas).add_params(selecao)
-        camadas.params[0].views = ["clique_barra", "clique_nome", "clique_taxa"]
+        # Uma faixa cobre a linha inteira e recebe o clique. Nomear cada camada
+        # e listá-las em views repete o sinal area_clicada_tuple, e o Vega
+        # deixa de desenhar o gráfico.
+        plot["x_alvo_ini"] = dominio_x[0]
+        plot["x_alvo_fim"] = dominio_x[1]
+        alvo = (
+            alt.Chart(plot)
+            .mark_bar(color="transparent", height=30, cursor="pointer")
+            .encode(
+                y=eixo_y,
+                x=alt.X(
+                    "x_alvo_ini:Q",
+                    scale=alt.Scale(domain=dominio_x, nice=False),
+                    axis=None,
+                ),
+                x2=alt.X2("x_alvo_fim:Q"),
+                tooltip=dicas,
+            )
+            .add_params(selecao)
+        )
+        camadas = barras + nomes + taxas + alvo
     else:
         camadas = barras + nomes + taxas
+    # #region agent log
+    if selecionavel:
+        try:
+            import json as _json
+            import time as _time
+            from collections import Counter as _Counter
+            import vl_convert as _vlc
+
+            _spec = camadas.to_dict()
+            _vega = _vlc.vegalite_to_vega(_spec)
+            _nomes = []
+
+            def _andar(no):
+                if isinstance(no, dict):
+                    for sinal in no.get("signals") or []:
+                        if isinstance(sinal, dict) and "area_clicada" in str(sinal.get("name")):
+                            _nomes.append(sinal.get("name"))
+                    for valor in no.values():
+                        _andar(valor)
+                elif isinstance(no, list):
+                    for valor in no:
+                        _andar(valor)
+
+            _andar(_vega)
+            _contagem = _Counter(_nomes)
+            _svg_erro = None
+            _spec_svg = dict(_spec)
+            _spec_svg["width"] = 400
+            try:
+                _vlc.vegalite_to_svg(_spec_svg)
+            except Exception as _erro:
+                _svg_erro = str(_erro).splitlines()[1] if "\n" in str(_erro) else str(_erro)
+            with open(
+                "/home/andre/AA_UFRGS/pós_graduação_IA/IA001_analise_de_dados_python/codigo/brazil_university_dropouts_data_analysis/.cursor/debug-5c4ed3.log",
+                "a",
+                encoding="utf-8",
+            ) as _arquivo:
+                _arquivo.write(
+                    _json.dumps(
+                        {
+                            "sessionId": "5c4ed3",
+                            "runId": "post-fix",
+                            "hypothesisId": "B",
+                            "location": "evasao.py:grafico_barras",
+                            "message": "sinais da selecao no grafico de areas",
+                            "data": {
+                                "linhas": int(len(plot)),
+                                "views": list(camadas.params[0].views) if camadas.params else None,
+                                "sinais_duplicados": {k: v for k, v in _contagem.items() if v > 1},
+                                "svg_erro": _svg_erro,
+                            },
+                            "timestamp": int(_time.time() * 1000),
+                        },
+                        ensure_ascii=False,
+                    )
+                    + "\n"
+                )
+        except Exception as _erro:
+            import json as _json
+            import time as _time
+
+            with open(
+                "/home/andre/AA_UFRGS/pós_graduação_IA/IA001_analise_de_dados_python/codigo/brazil_university_dropouts_data_analysis/.cursor/debug-5c4ed3.log",
+                "a",
+                encoding="utf-8",
+            ) as _arquivo:
+                _arquivo.write(
+                    _json.dumps(
+                        {
+                            "sessionId": "5c4ed3",
+                            "runId": "post-fix",
+                            "hypothesisId": "A",
+                            "location": "evasao.py:grafico_barras",
+                            "message": "falha ao inspecionar o grafico de areas",
+                            "data": {"erro": f"{type(_erro).__name__}: {_erro}"},
+                            "timestamp": int(_time.time() * 1000),
+                        },
+                        ensure_ascii=False,
+                    )
+                    + "\n"
+                )
+    # #endregion
     if xmin < 0:
         zero = alt.Chart(pd.DataFrame({"taxa_pct": [0]})).mark_rule(
             color="#c5bfb4", strokeDash=[4, 3]
@@ -1288,19 +1385,8 @@ def grafico_dispersao_grupos(dados, titulo, rotulo_x, rotulo_y, por_area, tamanh
         )
         .add_params(destaque)
     )
-    camadas = diagonal + pontos
-    if por_area:
-        nomes = alt.Chart(plot).mark_text(
-            align="left", dx=8, fontSize=11, color=COR_TEXTO, clip=True
-        ).encode(
-            x=eixo_x(),
-            y=eixo_y(),
-            text="nome:N",
-            tooltip=dicas,
-        )
-        camadas = camadas + nomes
     return _fechar_grafico(
-        camadas,
+        diagonal + pontos,
         titulo,
         LADO_DISPERSAO,
         largura=LADO_DISPERSAO,
