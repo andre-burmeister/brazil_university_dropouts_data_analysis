@@ -3,10 +3,17 @@
 from pathlib import Path
 import copy
 import json
+import ssl
+import tempfile
+import time
+import urllib.error
+import urllib.request
+import zipfile
 import zlib
 
 import altair as alt
 import branca.colormap as cm
+import certifi
 import folium
 import numpy as np
 import pandas as pd
@@ -15,8 +22,17 @@ from branca.element import MacroElement, Template
 RAIZ = Path(__file__).resolve().parent
 PASTA_DADOS = RAIZ / "dados"
 CAMINHO_GEOJSON = RAIZ / "geo" / "brazil_states.geojson"
+CAMINHO_CA_INEP = RAIZ / "certs" / "rnp_icpedu_gr46_ov_tls_ca_2025.crt"
 ANO_INICIAL = 2023
 ANO_FINAL = 2024
+URLS_MICRODADOS = {
+    2023: "https://download.inep.gov.br/microdados/microdados_censo_da_educacao_superior_2023.zip",
+    2024: "https://download.inep.gov.br/microdados/microdados_censo_da_educacao_superior_2024.zip",
+}
+USER_AGENT_INEP = (
+    "Mozilla/5.0 (compatible; evasao-painel/1.0; +https://github.com/)"
+)
+TENTATIVAS_DOWNLOAD = 3
 
 MODALIDADE = {1: "Presencial", 2: "A distância"}
 ORGANIZACAO = {
@@ -272,6 +288,79 @@ def caminho_cursos(ano):
     )
 
 
+def contexto_ssl_inep():
+    """Confia na CA intermediária RNP ICPEdu (o servidor do Inep não envia a cadeia completa)."""
+    contexto = ssl.create_default_context(cafile=certifi.where())
+    contexto.load_verify_locations(cafile=str(CAMINHO_CA_INEP))
+    return contexto
+
+
+def baixar_arquivo(url, destino, contexto_ssl):
+    pedido = urllib.request.Request(url, headers={"User-Agent": USER_AGENT_INEP})
+    ultimo_erro = None
+    for tentativa in range(1, TENTATIVAS_DOWNLOAD + 1):
+        try:
+            with urllib.request.urlopen(
+                pedido, timeout=120, context=contexto_ssl
+            ) as resposta, destino.open("wb") as saida:
+                while True:
+                    bloco = resposta.read(1024 * 1024)
+                    if not bloco:
+                        break
+                    saida.write(bloco)
+            return
+        except (urllib.error.URLError, TimeoutError, ConnectionError, OSError) as erro:
+            ultimo_erro = erro
+            destino.unlink(missing_ok=True)
+            if tentativa < TENTATIVAS_DOWNLOAD:
+                time.sleep(2 * tentativa)
+    raise ultimo_erro
+
+
+def garantir_microdados(ano):
+    """Baixa o pacote do Inep e extrai só o CSV de cadastro de cursos, se faltar."""
+    destino = caminho_cursos(ano)
+    if destino.is_file():
+        return destino
+
+    url = URLS_MICRODADOS[ano]
+    nome_csv = f"MICRODADOS_CADASTRO_CURSOS_{ano}.CSV"
+    PASTA_DADOS.mkdir(parents=True, exist_ok=True)
+    destino.parent.mkdir(parents=True, exist_ok=True)
+
+    with tempfile.NamedTemporaryFile(
+        suffix=".zip", delete=False, dir=PASTA_DADOS
+    ) as temporario:
+        caminho_zip = Path(temporario.name)
+
+    try:
+        baixar_arquivo(url, caminho_zip, contexto_ssl_inep())
+
+        with zipfile.ZipFile(caminho_zip) as arquivo_zip:
+            membro = next(
+                (
+                    nome
+                    for nome in arquivo_zip.namelist()
+                    if Path(nome).name.upper() == nome_csv
+                ),
+                None,
+            )
+            if membro is None:
+                raise FileNotFoundError(
+                    f"{nome_csv} não encontrado em {url}"
+                )
+            with arquivo_zip.open(membro) as origem, destino.open("wb") as saida:
+                while True:
+                    bloco = origem.read(1024 * 1024)
+                    if not bloco:
+                        break
+                    saida.write(bloco)
+    finally:
+        caminho_zip.unlink(missing_ok=True)
+
+    return destino
+
+
 def ler_cursos(ano):
     return pd.read_csv(
         caminho_cursos(ano),
@@ -356,6 +445,8 @@ def calcular_evasao(cursos_inicial, cursos_final):
 
 
 def carregar_ofertas():
+    garantir_microdados(ANO_INICIAL)
+    garantir_microdados(ANO_FINAL)
     return calcular_evasao(ler_cursos(ANO_INICIAL), ler_cursos(ANO_FINAL))
 
 
