@@ -1,4 +1,7 @@
+# Microdados brutos do Inep e artefatos de compressão (locais)
 dados/*/*
+# O Parquet do app fica em dados/ofertas_pos_merge.parquet (um nível) e entra no Git
+
 __pycache__/
 .venv/
 brazil_dropouts_dashboard/

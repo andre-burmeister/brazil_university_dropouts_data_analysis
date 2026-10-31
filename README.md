@@ -25,30 +25,31 @@ A primeira aba mostra cursos, áreas do conhecimento e o mapa do Brasil. A segun
 
 ## Dados
 
-Os microdados são do [Censo da Educação Superior](https://www.gov.br/inep/pt-br/areas-de-atuacao/pesquisas-estatisticas-e-indicadores/censo-da-educacao-superior), do Instituto Nacional de Estudos e Pesquisas Educacionais Anísio Teixeira (Inep). A coleta usa o cadastro do Sistema e-MEC, que reúne os registros das instituições, dos cursos e dos locais de oferta. A página de resultados está em [Censo da Educação Superior — Resultados](https://www.gov.br/inep/pt-br/areas-de-atuacao/pesquisas-estatisticas-e-indicadores/censo-da-educacao-superior/resultados). Os arquivos são públicos e estão em CSV, com separador `;` e codificação Latin-1. O dicionário de variáveis vem no mesmo pacote, em planilha Excel.
+Os microdados são do [Censo da Educação Superior](https://www.gov.br/inep/pt-br/areas-de-atuacao/pesquisas-estatisticas-e-indicadores/censo-da-educacao-superior), do Instituto Nacional de Estudos e Pesquisas Educacionais Anísio Teixeira (Inep). A coleta usa o cadastro do Sistema e-MEC, que reúne os registros das instituições, dos cursos e dos locais de oferta. A página de resultados está em [Censo da Educação Superior — Resultados](https://www.gov.br/inep/pt-br/areas-de-atuacao/pesquisas-estatisticas-e-indicadores/censo-da-educacao-superior/resultados).
 
-Na primeira execução, o painel baixa sozinho os pacotes do Inep e extrai só o cadastro de cursos para a pasta `dados/`. Isso vale localmente e no Streamlit Cloud. Fontes:
+O painel **não baixa** os zips do Inep em tempo de execução. Os dados já processados (merge 2023–2024 e contagens de evasão) estão no repositório:
+
+```text
+dados/ofertas_pos_merge.parquet   # tabela usada pelo app (~14 MB)
+geo/brazil_states.geojson         # contorno dos estados
+```
+
+Fontes originais (apenas para regenerar o Parquet offline):
 
 - [Microdados do Censo da Educação Superior 2023](https://download.inep.gov.br/microdados/microdados_censo_da_educacao_superior_2023.zip)
 - [Microdados do Censo da Educação Superior 2024](https://download.inep.gov.br/microdados/microdados_censo_da_educacao_superior_2024.zip)
 
-Layout esperado após o download (ou após extração manual, se preferir offline):
+Para regenerar `dados/ofertas_pos_merge.parquet` a partir dos CSVs do Inep:
 
-```text
-dados/
-  microdados_censo_da_educacao_superior_2023/
-    dados/
-      MICRODADOS_CADASTRO_CURSOS_2023.CSV
-  microdados_censo_da_educacao_superior_2024/
-    dados/
-      MICRODADOS_CADASTRO_CURSOS_2024.CSV
+```bash
+python test_compressao_dados.py
 ```
 
-O contorno dos estados já está no repositório, em `geo/brazil_states.geojson`. Os microdados não entram no Git.
+Esse script baixa os microdados se faltarem, compara tamanhos de compressão e atualiza o Parquet do app.
 
 ## Como rodar
 
-É preciso Python 3.10 ou mais recente e acesso à internet na primeira execução. Na pasta do projeto:
+É preciso Python 3.10 ou mais recente. Na pasta do projeto:
 
 ```bash
 python3 -m venv .venv
@@ -57,4 +58,4 @@ pip install -r requirements.txt
 streamlit run app.py
 ```
 
-O painel abre em [http://localhost:8501](http://localhost:8501). O primeiro cold start pode demorar vários minutos (download dos zips do Inep e leitura dos CSVs); as execuções seguintes usam os arquivos em disco e o cache do Streamlit.
+O painel abre em [http://localhost:8501](http://localhost:8501). O cold start lê o Parquet local; as execuções seguintes usam o cache do Streamlit.

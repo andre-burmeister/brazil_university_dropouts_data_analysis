@@ -75,7 +75,7 @@ st.markdown(
 )
 
 
-@st.cache_data(show_spinner="Baixando/lendo os microdados do Censo da Educação Superior...")
+@st.cache_data(show_spinner="Carregando os dados de evasão...")
 def carregar_ofertas():
     return evasao.carregar_ofertas()
 
